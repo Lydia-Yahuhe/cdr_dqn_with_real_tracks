@@ -27,24 +27,17 @@ class BaseFeaturizer(metaclass=ABCMeta):
         raise NotImplementedError
 
     def featurize(self, data, batch_size=32):
-        """Encodes the radarTracks into an embedding
-        Data: ndarray with shape (-1, width, height, 1)
-        """
-        splitted_data = np.array_split(data, max(data.shape[0] // batch_size, 1))
-        feature_vectors = []
-        for batch in splitted_data:
-            normalized_batch = batch / 255
-            feature_vectors.append(self.sess.run(self.graph['feature_vector'],
-                                                 feed_dict={self.graph['is_training']: False,
-                                                            self.graph['state']: normalized_batch}))
-        feature_vectors = np.concatenate(feature_vectors)
-        return feature_vectors
+        if len(data.shape) == 3:
+            data = np.expand_dims(data, 0)
+
+        return self.sess.run(self.graph['feature_vector'],
+                             feed_dict={self.graph['is_training']: False, self.graph['state']: data / 255})
 
     def save(self, save_path='default'):
-        return self.saver.save(self.sess, save_path+'\default.ckpt')
+        return self.saver.save(self.sess, save_path + '\default.ckpt')
 
     def load(self, load_path='default'):
-        self.saver.restore(self.sess, load_path+'\default.ckpt')
+        self.saver.restore(self.sess, load_path + '\default.ckpt')
 
     def evaluate_cycle_consistency(self, data, sequence_length=1024):
         """Cycle-consistency evaluation as in "Playing hard exploration games by watching YouTube\""""

@@ -34,7 +34,10 @@ class ConflictEnv(gym.Env, ABC):
             self.action_space = spaces.Discrete(CmdCount)
         else:
             self.action_space = spaces.Box(low=-1, high=1, shape=(1, ), dtype=np.float64)
-        self.observation_space = spaces.Box(low=-np.inf, high=+np.inf, shape=(300, ), dtype=np.float64)
+
+        self.picture_size = (width, height, channel) = (670, 450, 3)
+        self.observation_space = spaces.Box(low=-np.inf, high=+np.inf, shape=(height, width, channel), dtype=np.float64)
+
         print('----------env----------')
         print('    train size: {:>6}'.format(len(self.train)))
         print(' validate size: {:>6}'.format(len(self.test)))
@@ -64,7 +67,7 @@ class ConflictEnv(gym.Env, ABC):
             info = self.test.pop(0)
             self.scene = ConflictScene(info, limit=self.limit)
 
-        return self.scene.get_states()
+        return self.scene.get_states(*self.picture_size)
 
     def step(self, action, scene=None):
         if scene is None:
@@ -72,7 +75,7 @@ class ConflictEnv(gym.Env, ABC):
 
         solved, cmd_info = scene.do_step(action)
         rewards = calc_reward(solved, cmd_info)
-        states = scene.get_states()
+        states = scene.get_states(*self.picture_size)
         self.result = solved
         return states, rewards, True, {'result': solved}
 

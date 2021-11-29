@@ -27,8 +27,7 @@ class TDCFeaturizer(BaseFeaturizer):
         super().__init__()
         print("Starting featurizers initialization")
         self.sess = tf.Session()
-        self.graph = self._generate_featurizer(initial_width, initial_height,
-                                               desired_width, desired_height,
+        self.graph = self._generate_featurizer(initial_width, initial_height, desired_width, desired_height,
                                                feature_vector_size, learning_rate)
         self.saver = tf.train.Saver()
         timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
@@ -54,20 +53,19 @@ class TDCFeaturizer(BaseFeaturizer):
             graph object that contains the public nodes of the model.
         """
         is_training = tf.placeholder(dtype=tf.bool, shape=(), name="is_training")
-        stacked_state = tf.placeholder(dtype=tf.float32,
-                                       shape=(None, 2, initial_width, initial_height, 1),
+        stacked_state = tf.placeholder(dtype=tf.float32, shape=(None, 2, initial_height, initial_width, 3),
                                        name="stacked_state")
         labels = tf.placeholder(dtype=tf.float32, shape=(None, 6), name="labels")  # There are 6 possible labels
 
-        state = tf.reshape(stacked_state, (-1, initial_width, initial_height, 1))
-        state = tf.random_crop(state, (tf.shape(state)[0], desired_width, desired_height, 1))
+        state = tf.reshape(stacked_state, (-1, initial_height, initial_width, 3))
+        state = tf.random_crop(state, (tf.shape(state)[0], desired_height, desired_width, 3))
 
         with tf.variable_scope('Encoder'):
             x = state
-            for filters, strides in [(32, 2), (64, 1), (64, 1)]:
+            for filters, strides in [(8, 2)]:
                 x = self._convolutional_layer(x, filters, strides, is_training)
-            for i in range(3):
-                x = residual_block(x, 64, 64, 1, is_training)
+            for i in range(1):
+                x = residual_block(x, 8, 8, 1, is_training)
 
             x = tf.layers.flatten(x)
             x = tf.layers.dense(
@@ -156,16 +154,16 @@ class TDCFeaturizer(BaseFeaturizer):
         """Runs the training algorithm"""
         from tqdm import tqdm
         print("Starting training procedure")
-        for epoch in tqdm(range(epochs)):
+        for epoch in tqdm(range(1, epochs+1)):
             # frames == state
             frames, labels = self._generate_training_data(dataset, batch_size)
-            _, train_summary, accuracy = self.sess.run([self.graph['train_op'],
-                                                        self.graph['summaries'],
-                                                        self.graph['accuracy_update_op']],
-                                                       feed_dict={self.graph['is_training']: True,
-                                                                  self.graph['stacked_state']: frames,
-                                                                  self.graph['labels']: labels})
-            if epoch % 10 == 0:
+            print(frames.shape, labels.shape)
+
+            _, train_summary, accuracy = self.sess.run(
+                [self.graph['train_op'], self.graph['summaries'], self.graph['accuracy_update_op']],
+                feed_dict={self.graph['is_training']: True, self.graph['stacked_state']: frames,
+                           self.graph['labels']: labels})
+            if epoch % 1 == 0:
                 print('Epoch: {}/{}'.format(epoch, epochs))
                 self.summary_writer.add_summary(train_summary, epoch)
         return True
@@ -177,11 +175,14 @@ class TDCFeaturizer(BaseFeaturizer):
         Input radarTracks: two frames that are a number of time steps apart
         Output: classify how many frames there are between the frames.
         """
-        frames = np.empty((number_of_samples, 2, *videos[0].shape[1:]))
+        video = videos[random.randint(0, len(videos) - 1)]
+
+        [video_len, *video_shape] = video.shape
+
+        frames = np.empty((number_of_samples, 2, *video_shape))
         labels = np.zeros((number_of_samples, 6))
 
         for i in range(number_of_samples):
-            video_index = random.randint(0, len(videos) - 1)
             interval = random.randint(0, 5)
             if interval == 0:
                 possible_frames_start = 0
@@ -202,13 +203,11 @@ class TDCFeaturizer(BaseFeaturizer):
                 possible_frames_start = 21
                 possible_frames_end = 60
 
-            # print(interval, video_index, videos[video_index].shape, possible_frames_start, possible_frames_end)
-
-            first_frame_index = random.randint(0, videos[video_index].shape[0] - possible_frames_end - 1)
+            first_frame_index = random.randint(0, video_len - possible_frames_end - 1)
             second_frame_index = random.randint(possible_frames_start, possible_frames_end)
 
-            frames[i, 0] = videos[video_index][first_frame_index] / 255  # To normalize radarTracks
-            frames[i, 1] = videos[video_index][first_frame_index + second_frame_index] / 255
+            frames[i, 0] = video[first_frame_index] / 255  # To normalize radarTracks
+            frames[i, 1] = video[first_frame_index + second_frame_index] / 255
             labels[i, interval] = 1.
 
         return frames, labels

@@ -35,11 +35,3 @@ class Dset(object):
         inputs = self.inputs[self.pointer:end]
         self.pointer = end
         return inputs
-
-
-class Mujoco_Dset(object):
-    def __init__(self, expert_path, randomize=True):
-        self.dset = Dset(np.load(expert_path)['states'], randomize)
-
-    def get_next_batch(self, batch_size):
-        return self.dset.get_next_batch(batch_size=batch_size)

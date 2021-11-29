@@ -29,11 +29,9 @@ def logit_bernoulli_entropy(logits):
 class TransitionClassifier(object):
     def __init__(self, env, hidden_size, entcoeff=0.001, scope="adversary"):
         self.scope = scope
-        self.observation_shape = env.observation_space.shape
-        print(self.observation_shape)
 
-        self.generator_obs_ph = tf.placeholder(tf.float32, (None,) + self.observation_shape, name="observations_ph")
-        self.expert_obs_ph = tf.placeholder(tf.float32, (None,) + self.observation_shape, name="expert_observations_ph")
+        self.generator_obs_ph = tf.placeholder(tf.float32, (None, 256), name="observations_ph")
+        self.expert_obs_ph = tf.placeholder(tf.float32, (None, 256), name="expert_observations_ph")
 
         # Build graph
         generator_logits = self.__build_graph(self.generator_obs_ph, hidden_size=hidden_size)
@@ -71,37 +69,12 @@ class TransitionClassifier(object):
             [self.generator_obs_ph, self.expert_obs_ph],
             self.losses + [U.flatgrad(self.total_loss, var_list)])
 
-    def __build_graph(self, obs_ph, hidden_size=128, reuse=False, is_training=True):
+    def __build_graph(self, obs_ph, hidden_size=128, reuse=False):
         with tf.variable_scope(self.scope):
             if reuse:
                 tf.get_variable_scope().reuse_variables()
 
-            # print('adversary', x.shape)
-            #
-            # for filters, strides in [(3, 2), (3, 2)]:
-            #     print(filters, strides, x.shape, end=', ')
-            #     x = tf.layers.conv2d(
-            #         x,
-            #         filters=filters,
-            #         kernel_size=(5, 5),
-            #         strides=strides,
-            #         padding='same',
-            #         activation=tf.nn.relu,
-            #         kernel_initializer=tf.truncated_normal_initializer(stddev=0.1),
-            #         kernel_regularizer=tf.contrib.layers.l2_regularizer(0.001)
-            #     )
-            #     print('conv2d', x.shape, end=', ')
-            #     x = tf.layers.batch_normalization(x, training=is_training)
-            #     print('batch', x.shape, end=', ')
-            #     x = tf.layers.max_pooling2d(x, 2, 2)
-            #     print('pooling', x.shape)
-            #
-            # x = tf.layers.flatten(x)
-            # print(x.shape)
-
-            with tf.variable_scope("obfilter"):
-                self.obs_rms = RunningMeanStd(shape=self.observation_shape)
-            x = (obs_ph - self.obs_rms.mean) / self.obs_rms.std
+            x = obs_ph
             x = tf.contrib.layers.fully_connected(x, hidden_size, activation_fn=tf.nn.relu)
             x = tf.contrib.layers.fully_connected(x, hidden_size, activation_fn=tf.nn.relu)
             logits = tf.contrib.layers.fully_connected(x, 1, activation_fn=tf.identity)
@@ -119,68 +92,64 @@ class TransitionClassifier(object):
             obs = np.expand_dims(obs, 0)
         feed_dict = {self.generator_obs_ph: obs}
         reward = sess.run(self.reward_op, feed_dict)
-        # print('reward:', reward.shape)
         return reward
 
 
-if __name__ == '__main__':
-    from tqdm import tqdm
-
-    from fltenv.env import ConflictEnv
-    from baselines.gail.dataset import generate_dataset
-
-    env = ConflictEnv(limit=0)
-
-    print(env.picture_size)
-    dataset = generate_dataset('dataset\\env_train.avi', env.picture_size)
-
-    reward_giver = TransitionClassifier(env, 128, entcoeff=0.1)
-    adam = reward_giver.adam
-
-    U.initialize()
-    adam.sync()
-
-    num_steps = int(2e5)
-    num_actions = env.action_space.n
-    actions = list(range(num_actions))
-
-    col = []
-    for iter_so_far in tqdm(range(1, num_steps+1)):
-        ob_expert = dataset.get_next_batch(32)
-        ob_batch = ob_expert[:, :]
-        *train_loss, g = reward_giver.lossandgrad(ob_batch, ob_expert)
-        adam.update(g, 1e-4)
-
-        # print(train_loss)
-        col.append(train_loss)
-
-        if iter_so_far % 100 == 0:
-            train_loss = np.mean(col, axis=0)
-            print(train_loss.shape)
-            logger.record_tabular("step", iter_so_far)
-            logger.record_tabular("g_loss", train_loss[0])
-            logger.record_tabular("e_loss", train_loss[1])
-            logger.record_tabular("entropy", train_loss[2])
-            logger.record_tabular("entropy_loss", train_loss[3])
-            logger.record_tabular("g_acc", train_loss[4])
-            logger.record_tabular("e_acc", train_loss[5])
-            logger.record_tabular("t_loss", train_loss[6])
-
-            ob_expert = dataset.get_next_batch(-1)
-            ob_batch = ob_expert[:, :]
-
-            rewards_expert = reward_giver.get_reward(ob_expert)
-            logger.record_tabular("rewards_expert", np.mean(rewards_expert))
-
-            rewards_batch = reward_giver.get_reward(ob_batch)
-            logger.record_tabular("rewards_batch", np.mean(rewards_batch))
-
-            print(rewards_expert.shape, rewards_batch.shape)
-
-            logger.dump_tabular()
-
-            if iter_so_far % 10000 == 0:
-                U.save_variables('discriminator_{}'.format(num_steps), variables=reward_giver.get_variables())
-
-
-
+# if __name__ == '__main__':
+#     from tqdm import tqdm
+#
+#     from fltenv.env import ConflictEnv
+#     from baselines.gail.dataset import generate_dataset
+#
+#     env = ConflictEnv(limit=0)
+#
+#     print(env.picture_size)
+#     dataset = generate_dataset('../../dataset/env_train.avi', env.picture_size)
+#
+#     reward_giver = TransitionClassifier(env, 128, entcoeff=0.1)
+#     adam = reward_giver.adam
+#
+#     U.initialize()
+#     adam.sync()
+#
+#     num_steps = int(2e5)
+#     num_actions = env.action_space.n
+#     actions = list(range(num_actions))
+#
+#     col = []
+#     for iter_so_far in tqdm(range(1, num_steps+1)):
+#         ob_expert = dataset.get_next_batch(32)
+#         ob_batch = ob_expert[:, :]
+#         *train_loss, g = reward_giver.lossandgrad(ob_batch, ob_expert)
+#         adam.update(g, 1e-4)
+#
+#         # print(train_loss)
+#         col.append(train_loss)
+#
+#         if iter_so_far % 100 == 0:
+#             train_loss = np.mean(col, axis=0)
+#             print(train_loss.shape)
+#             logger.record_tabular("step", iter_so_far)
+#             logger.record_tabular("g_loss", train_loss[0])
+#             logger.record_tabular("e_loss", train_loss[1])
+#             logger.record_tabular("entropy", train_loss[2])
+#             logger.record_tabular("entropy_loss", train_loss[3])
+#             logger.record_tabular("g_acc", train_loss[4])
+#             logger.record_tabular("e_acc", train_loss[5])
+#             logger.record_tabular("t_loss", train_loss[6])
+#
+#             ob_expert = dataset.get_next_batch(-1)
+#             ob_batch = ob_expert[:, :]
+#
+#             rewards_expert = reward_giver.get_reward(ob_expert)
+#             logger.record_tabular("rewards_expert", np.mean(rewards_expert))
+#
+#             rewards_batch = reward_giver.get_reward(ob_batch)
+#             logger.record_tabular("rewards_batch", np.mean(rewards_batch))
+#
+#             print(rewards_expert.shape, rewards_batch.shape)
+#
+#             logger.dump_tabular()
+#
+#             if iter_so_far % 10000 == 0:
+#                 U.save_variables('discriminator_{}'.format(num_steps), variables=reward_giver.get_variables())

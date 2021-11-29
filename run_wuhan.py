@@ -4,46 +4,60 @@ import matplotlib.pyplot as plt
 from rdp.file_processor import get_fpl_list
 from rdp.model import AgentSetReal
 
+from fltsim.visual import cv2, add_points_on_base_map
 
-def main(limit=50):
+
+def main(picture_size=(670, 450), wait_time=1):
     # 从excel中提取轨迹和航班信息
-    fpl_list, starts = get_fpl_list(alt_limit=6000.0, number=100)
+    fpl_list, starts = get_fpl_list(alt_limit=3000.0, number=1000)
 
     # 构建agent set类
     agent_set = AgentSetReal(fpl_list, starts)
 
-    states_array = []
+    kwargs = dict(border=[109.3, 116, 29, 33.5], scale=100)
+
+    # 定义编解码器并创建VideoWriter对象
+    fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+    out = None
+
+    start_write, count = False, 0
     # agentSet运行
     while not agent_set.all_done:
-        states_t = agent_set.do_step()
+        base_img = cv2.imread('.\\dataset\\wuhan_base.jpg', cv2.IMREAD_COLOR)
+        states = agent_set.do_step()
 
-        if len(states_t) > 10:
-            states = [[0.0 for _ in range(6)] for _ in range(limit)]
+        if len(states) > 10:
+            if not start_write:
+                count += 1
+                start_write = True
 
-            j = 0
-            for key, state in states_t.items():
-                ele = [state[0],
-                       state[1],
-                       state[2] / 3000,
-                       (state[3] - 150) / 100,
-                       state[4] / 20,
-                       state[5] / 180]
-                states[min(limit - 1, j)] = ele
-                j += 1
-            states = np.concatenate(states)
-            states_array.append(states)
-    states_array = np.stack(states_array)
-    np.savez('dataset/real_tracks.npz', states=states_array)
+            if start_write:
+                if out is None:
+                    out = cv2.VideoWriter('gail_video_{}.avi'.format(count), fourcc, 20.0, picture_size)
+
+                locations = [[key] + state for key, state in states.items()]
+                frame, _ = add_points_on_base_map(locations, base_img, **kwargs)
+                frame = cv2.resize(frame, picture_size)
+                out.write(frame)
+        else:
+            if start_write:
+                out.release()
+                cv2.waitKey(1) & 0xFF
+                cv2.destroyAllWindows()
+
+                out = None
+                start_write = False
 
     print('\n>>> The process of running agent set is finished!')
 
     # 可视化历史轨迹和计划轨迹
-    agent_set.visual(save_path='AgentSet')
+    # agent_set.visual(save_path='AgentSet')
+
     # 可视化流量
     agent_set.flow_visual()
     print('\n>>> Agent set is visualized!')
-
     return
+
     print('\n>>> Distance curves are setting to figure:')
     check_list = []
     for a0_id, sur_states in agent_set.around_agents.items():
@@ -84,7 +98,4 @@ def main(limit=50):
 
 
 if __name__ == '__main__':
-    # main()
-    data = np.load('dataset/real_tracks.npz')
-    for name, array in data.items():
-        print(name, array.shape)
+    main()

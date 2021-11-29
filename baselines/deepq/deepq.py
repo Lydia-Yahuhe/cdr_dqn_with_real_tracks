@@ -1,4 +1,5 @@
 import os
+import random
 import tempfile
 
 import tensorflow as tf
@@ -119,6 +120,7 @@ def learn(env,
           gamma=1.0,
           reward_giver=None,
           expert_dataset=None,
+          featurizer=None,
           target_network_update_freq=500,
           prioritized_replay=False,
           prioritized_replay_alpha=0.6,
@@ -128,69 +130,6 @@ def learn(env,
           param_noise=False,
           load_path=None,
           **network_kwargs):
-    """Train a deepq model.
-
-    Parameters
-    -------
-    env: gym.Env
-        environment to train on
-    network: string or a function
-        neural network to use as a q function approximator. If string, has to be one of the names of registered models in baselines.common.models
-        (mlp, cnn, conv_only). If a function, should take an observation tensor and return a latent variable tensor, which
-        will be mapped to the Q function heads (see build_q_func in baselines.deepq.models for details on that)
-    seed: int or None
-        prng seed. The runs with the same seed "should" give the same results. If None, no seeding is used.
-    lr: float
-        learning rate for adam optimizer
-    total_timesteps: int
-        number of env steps to optimizer for
-    buffer_size: int
-        size of the replay buffer
-    exploration_fraction: float
-        fraction of entire training period over which the exploration rate is annealed
-    exploration_final_eps: float
-        final value of random action probability
-    train_freq: int
-        update the model every `train_freq` steps.
-    batch_size: int
-        size of a batch sampled from replay buffer for training
-    print_freq: int
-        how often to print out training progress
-        set to None to disable printing
-    learning_starts: int
-        how many steps of the model to collect transitions for before learning starts
-    gamma: float
-        discount factor
-    reward_giver: object
-        GAN network
-    expert_dataset: object
-        expert demonstrations
-    target_network_update_freq: int
-        update the target network every `target_network_update_freq` steps.
-    prioritized_replay: True
-        if True prioritized replay buffer will be used.
-    prioritized_replay_alpha: float
-        alpha parameter for prioritized replay buffer
-    prioritized_replay_beta0: float
-        initial value of beta for prioritized replay buffer
-    prioritized_replay_beta_iters: int
-        number of iterations over which beta will be annealed from initial value
-        to 1.0. If set to None equals to total_timesteps.
-    prioritized_replay_eps: float
-        epsilon to add to the TD errors when updating priorities.
-    param_noise: bool
-        whether or not to use parameter space noise (https://arxiv.org/abs/1706.01905)
-    load_path: str
-        path to load the model from. (default: None)
-    **network_kwargs
-        additional keyword arguments to pass to the network builder.
-
-    Returns
-    -------
-    act: ActWrapper
-        Wrapper over act function. Adds ability to save it and load it.
-        See header of baselines/deepq/categorical.py for details on the act function.
-    """
     # Create all the functions necessary to train the model
 
     sess = get_session()
@@ -283,8 +222,10 @@ def learn(env,
         new_obs, true_rew, done, _ = env.step(env_action)
 
         # Store transition in the replay buffer.
-        rew = reward_giver.get_reward(new_obs)[0][0]
-        print('{:>+7.4f}, {:>4d}'.format(round(rew, 4), env_action), end=', ')
+        rew = reward_giver.get_reward(featurizer.featurize(new_obs))[0][0]
+        data_set = expert_dataset[0].get_next_batch(batch_size=64)
+        rew_e = reward_giver.get_reward(featurizer.featurize(data_set))
+        print('{:>+7.4f}, {:>+7.4f}, {:>4d}'.format(round(rew, 4), round(np.mean(rew_e), 4), env_action), end=', ')
         replay_buffer.add(obs, action, rew, new_obs, float(done))
         obs = new_obs
 
@@ -315,13 +256,14 @@ def learn(env,
             d_step = 3
             experience = replay_buffer.sample(batch_size*d_step)
             (_, _, _, obses_tp1, *_) = experience
+            data_set = expert_dataset[random.randint(0, len(expert_dataset) - 1)]
 
             for ob_batch in iterbatches(obses_tp1, batch_size=len(obses_tp1) // d_step):
                 real_batch_size = len(ob_batch)
-                obs_e = expert_dataset.get_next_batch(batch_size=real_batch_size)
-                if hasattr(reward_giver, "obs_rms"):
-                    reward_giver.obs_rms.update(np.concatenate((ob_batch, obs_e), 0))
 
+                obs_e = data_set.get_next_batch(batch_size=real_batch_size)
+                obs_e = featurizer.featurize(obs_e)
+                ob_batch = featurizer.featurize(ob_batch)
                 *newlosses, g = reward_giver.lossandgrad(ob_batch, obs_e)
                 reward_giver.adam.update(g, 1e-4)
                 d_losses.append(newlosses)
